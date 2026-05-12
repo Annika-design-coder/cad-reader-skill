@@ -2,7 +2,9 @@
 name: cad-reader
 description: 通用 CAD 读图证据层。Use when a user uploads or references DWG/DXF/drawing-PDF files and asks natural-language questions about reading, rendering, locating, zooming, extracting text/dimensions/layers/marks/components, basic measuring/counting, proxy/Tianzheng diagnostics, or evidence-backed drawing understanding. Do not use as the primary workflow for formal BOQ, pricing, contractual quantity takeoff, code certification, or professional design-liability review.
 ---
+## Integration Reference
 
+For non-Codex Agents, deployment details, tool schemas, hosted-service boundaries, output files, and smoke tests, read `references/agent_integration.md` and `agent_tools.json`.
 # CAD Reader
 
 ## Role
@@ -208,7 +210,5 @@ Suggested pause wording:
 这类图纸可能会发送到 CAD 读图服务处理。是否允许上传到已配置的读图服务？如果不允许，我需要使用已批准的私有读图环境，或者只基于你提供的截图/PDF做有限检查。
 ```
 
-## Integration Reference
 
-For non-Codex Agents, deployment details, tool schemas, hosted-service boundaries, output files, and smoke tests, read `references/agent_integration.md` and `agent_tools.json`.
 
