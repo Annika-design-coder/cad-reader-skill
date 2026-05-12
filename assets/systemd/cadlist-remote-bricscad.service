@@ -1,0 +1,29 @@
+[Unit]
+Description=CADList Remote BricsCAD Reader
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=caduser
+Group=caduser
+WorkingDirectory=/opt/cadlist/cad-reader-skill
+EnvironmentFile=-/etc/cadlist/remote-bricscad.env
+Environment=PYTHONUNBUFFERED=1
+Environment=BRICSCAD_SERVER_HOST=127.0.0.1
+Environment=BRICSCAD_SERVER_PORT=18765
+# Set BRICSCAD_SERVER_TOKEN in /etc/cadlist/remote-bricscad.env before exposing this service beyond localhost.
+Environment=BRICSCAD_SERVER_TOKEN=
+Environment=BRICSCAD_CMD=/opt/bricsys/bricscad/v26/bricscad.sh
+Environment=BRICSCAD_LISP_PATH=/opt/cadlist/cad-reader-skill/scripts/remote_bricscad_export.lsp
+Environment=BRICSCAD_USE_XVFB=auto
+ExecStart=/usr/bin/python3 /opt/cadlist/cad-reader-skill/scripts/remote_bricscad_server.py
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGINT
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,22 @@
+interface:
+  display_name: "CAD Reader"
+  short_description: "Read, render, query, and measure CAD drawings through a remote BricsCAD reader."
+  brand_color: "#2563EB"
+  default_prompt: "Use $cad-reader to answer my question about this DWG/DXF/PDF drawing with evidence and preview images."
+
+policy:
+  allow_implicit_invocation: true
+  backend_boundary: "Use only the configured remote BricsCAD reader service or approved private remote deployment. Do not use local CAD software, local parser replacements, or local DWG/DXF/PDF conversion/rasterization."
+  rendered_image_host_context:
+    required_caption_fields:
+      - display_reason
+      - suspected_issue
+      - evidence_strength
+    evidence_strength_values:
+      - strong
+      - moderate
+      - weak
+    rule: "display_reason and suspected_issue are host/Agent caption metadata, not CLI parameters. Show rendered images only for a concrete evidence need, not as a default overview."
+  first_pass_timeout_strategy: "For broad or unfamiliar drawings, run inspect/diagnose without rendering first. If that pass times out, mark the drawing for a separate narrow retry and continue with any drawings that returned."
+  tianzheng_t20_limit: "Treat proxy/Tianzheng/T20 custom objects as limited evidence. Do not use proxy internals as final quantity, dimension, or risk evidence; request provider-supplied same-version PDF or ordinary AutoCAD-object DWG when needed."
+

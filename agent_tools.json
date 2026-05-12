@@ -1,0 +1,1261 @@
+{
+  "schema_version": "cad-reader.agent-tools.v1",
+  "package_version": "0.2.0",
+  "name": "cad-reader",
+  "description": "Read DWG/DXF/drawing-PDF drawings through a configured remote BricsCAD service and return evidence-backed answers plus preview images.",
+  "license": "Apache-2.0",
+  "entrypoint": "scripts/cad_reader_tool.py",
+  "runtime": {
+    "type": "python-subprocess",
+    "python": ">=3.10",
+    "dependencies": "requirements.txt",
+    "command_template": [
+      "{python}",
+      "scripts/cad_reader_tool.py",
+      "--work-root",
+      "{skill_dir}",
+      "{command}"
+    ],
+    "cwd": "{skill_dir}",
+    "stdout": "json",
+    "stderr": "operator-log-only",
+    "requires_filesystem": true,
+    "requires_network": true
+  },
+  "install": {
+    "pip_requirements": "requirements.txt",
+    "note": "The wrapper currently uses only the Python standard library; requirements.txt is retained as a stable extension point.",
+    "smoke_test": [
+      "{python}",
+      "scripts/test_cad_reader_tool.py",
+      "--skip-remote"
+    ]
+  },
+  "environment": {
+    "required": [
+      {
+        "name": "CADLIST_REMOTE_BRICSCAD_URL",
+        "secret": false,
+        "description": "Base URL of the private/approved remote BricsCAD reader service."
+      }
+    ],
+    "optional": [
+      {
+        "name": "CADLIST_REMOTE_BRICSCAD_TOKEN",
+        "secret": true,
+        "description": "Bearer token for the remote BricsCAD reader service."
+      },
+      {
+        "name": "CADLIST_REMOTE_BRICSCAD_TIMEOUT",
+        "secret": false,
+        "default": "900"
+      },
+      {
+        "name": "CADLIST_TANGENT_WORKER_URL",
+        "secret": false,
+        "description": "Optional Windows CAD worker for Tianzheng/T20 workflows."
+      },
+      {
+        "name": "CADLIST_TANGENT_WORKER_TOKEN",
+        "secret": true
+      },
+      {
+        "name": "CADLIST_TANGENT_WORKER_TIMEOUT",
+        "secret": false,
+        "default": "900"
+      }
+    ],
+    "fail_closed_without_required": true
+  },
+  "inputs": {
+    "supported_extensions": [
+      ".dwg",
+      ".dxf",
+      ".pdf"
+    ],
+    "supported_kinds": [
+      "DWG",
+      "DXF",
+      "drawing-PDF"
+    ],
+    "file_path_policy": "The host adapter must save uploads to an allowlisted workspace and pass host-created absolute paths only. Do not accept arbitrary user-written paths without platform authorization.",
+    "privacy_boundary": "Drawing content is sent to the configured CAD reader service. Operators must approve endpoint, retention, logging, and tenant isolation before enabling this skill."
+  },
+  "triggers": {
+    "keywords": [
+      "CAD",
+      "DWG",
+      "DXF",
+      "图纸",
+      "施工图",
+      "审图",
+      "轴网",
+      "尺寸",
+      "标注",
+      "图层",
+      "构件",
+      "天正",
+      "T20",
+      "代理对象",
+      "专业冲突"
+    ],
+    "file_extensions": [
+      ".dwg",
+      ".dxf",
+      ".pdf"
+    ],
+    "intents": [
+      "read drawing",
+      "render drawing",
+      "locate drawing item",
+      "extract CAD text/dimensions/layers",
+      "basic measurement/counting",
+      "proxy/Tianzheng diagnostics",
+      "evidence-backed drawing question"
+    ],
+    "negative_intents": [
+      "formal BOQ",
+      "pricing",
+      "contractual quantity takeoff",
+      "code compliance certification",
+      "professional design liability review",
+      "general OCR unrelated to CAD"
+    ]
+  },
+  "backend_boundary": {
+    "cad_backend": "remote-bricscad-only",
+    "requires_remote_service": true,
+    "forbidden_fallbacks": [
+      "local desktop CAD software",
+      "local AutoCAD or local BricsCAD",
+      "local ODA/Teigha, LibreCAD, QCAD, or parser-library replacement reading paths",
+      "local DWG/DXF/PDF conversion scripts",
+      "local DXF/SVG/PNG/image-tile rasterization as CAD evidence",
+      "vector-normalized local render as strong visual evidence"
+    ],
+    "render_failure_policy": "If remote BricsCAD rendering fails, return a structured failure or degraded weak-evidence response. Do not generate local substitute images."
+  },
+  "adapter_display_policy": {
+    "applies_to": [
+      "cad.render",
+      "cad.region with render=true",
+      "cad.diagnose with render_focus=true",
+      "cad.ask when preview_image/focus_images are displayed"
+    ],
+    "required_host_context": [
+      "display_reason",
+      "suspected_issue",
+      "evidence_strength"
+    ],
+    "evidence_strength_values": [
+      "strong",
+      "moderate",
+      "weak"
+    ],
+    "rule": "display_reason and suspected_issue are host/Agent caption metadata, not CLI parameters. Show rendered images only when they support a concrete location, dimension, annotation, component, conflict, risk, or confirmation."
+  },
+  "artifact_contract": {
+    "local_path_fields": [
+      "preview_image",
+      "full_preview",
+      "evidence"
+    ],
+    "image_fields": [
+      "preview_image",
+      "focus_images[].preview_image",
+      "data.full_preview"
+    ],
+    "host_responsibility": "Validate returned files, copy images to platform-visible attachments or signed URLs, and avoid showing backend-local paths to ordinary users."
+  },
+  "execution_policy": {
+    "result_success_rule": "Parse stdout JSON first. Treat ok=false as business failure even if exit code is 0; preserve structured JSON when exit code is nonzero but stdout is valid JSON.",
+    "exit_codes": {
+      "0": "success",
+      "1": "health/test failure or structured business failure",
+      "2": "user/file/service error",
+      "other": "invocation/runtime failure"
+    },
+    "first_pass_timeout_policy": "For unfamiliar, large, or broad-scan drawings, first call inspect/diagnose without rendering and with a modest entity limit. If the first pass times out, mark that drawing for a separate narrow retry and continue with drawings that returned.",
+    "remote_timeout_recovery": "On CAD_READER_REMOTE_TIMEOUT or remote timeout, retry only with a narrower layout/region/query or lower entity limit. Do not invoke local CAD or local conversion.",
+    "recommended_concurrency": {
+      "per_user": 1,
+      "per_service": 2
+    }
+  },
+  "tianzheng_t20_policy": {
+    "signals": [
+      "TDb*",
+      "proxy",
+      "custom object",
+      "Tianzheng",
+      "T20"
+    ],
+    "rule": "Treat these as Tianzheng/T20 custom objects. Continue from ordinary CAD objects and remote rendered evidence, but do not use proxy internals as final quantity, dimension, or risk evidence.",
+    "recovery": "Ask for a same-version provider-supplied PDF for visual confirmation, or a provider-supplied DWG converted to ordinary AutoCAD objects when object-level extraction is required. Do not perform local conversion."
+  },
+  "state_fields": [
+    "focus_id",
+    "previous_bbox",
+    "evidence_id"
+  ],
+  "tools": [
+    {
+      "name": "cad.health",
+      "provider_safe_name": "cad_health",
+      "aliases": [
+        "cad_health"
+      ],
+      "command": "health",
+      "description": "Check whether the configured remote BricsCAD reader is reachable and ready.",
+      "argv": [
+        "{python}",
+        "scripts/cad_reader_tool.py",
+        "--work-root",
+        "{skill_dir}",
+        "health"
+      ],
+      "parameters_schema": {
+        "type": "object",
+        "required": [],
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "focus_id": {
+            "type": "string"
+          },
+          "previous_bbox": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "[xmin, ymin, xmax, ymax] in CAD drawing coordinates"
+          },
+          "evidence_id": {
+            "type": "string"
+          },
+          "evidence_strength": {
+            "type": "string",
+            "enum": [
+              "strong",
+              "moderate",
+              "weak"
+            ]
+          },
+          "evidence": {
+            "type": "string",
+            "description": "Backend-local evidence JSON path for adapter/audit use."
+          },
+          "service": {
+            "type": "string"
+          },
+          "endpoint_configured": {
+            "type": "boolean"
+          },
+          "response": {
+            "type": "object"
+          }
+        }
+      },
+      "timeout_seconds": 60,
+      "media_outputs": []
+    },
+    {
+      "name": "cad.ask",
+      "provider_safe_name": "cad_ask",
+      "aliases": [
+        "cad_ask"
+      ],
+      "command": "ask",
+      "description": "Answer a natural-language question about a drawing and return evidence plus preview images.",
+      "argv": [
+        "{python}",
+        "scripts/cad_reader_tool.py",
+        "--work-root",
+        "{skill_dir}",
+        "ask"
+      ],
+      "parameters_schema": {
+        "type": "object",
+        "required": [
+          "file",
+          "question"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "Host-created absolute DWG/DXF/drawing-PDF path inside the upload allowlist."
+          },
+          "entity_limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200000,
+            "description": "Maximum entities requested from the CAD reader."
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Ignore cache and re-read the drawing."
+          },
+          "focus_id": {
+            "type": "string",
+            "description": "Previous focus handle supplied by the host adapter."
+          },
+          "previous_bbox": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "[xmin, ymin, xmax, ymax] in CAD drawing coordinates"
+          },
+          "evidence_id": {
+            "type": "string",
+            "description": "Parent evidence id supplied by the host adapter."
+          },
+          "question": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "default": 20
+          },
+          "no_render": {
+            "type": "boolean"
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "focus_id": {
+            "type": "string"
+          },
+          "previous_bbox": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "[xmin, ymin, xmax, ymax] in CAD drawing coordinates"
+          },
+          "evidence_id": {
+            "type": "string"
+          },
+          "evidence_strength": {
+            "type": "string",
+            "enum": [
+              "strong",
+              "moderate",
+              "weak"
+            ]
+          },
+          "evidence": {
+            "type": "string",
+            "description": "Backend-local evidence JSON path for adapter/audit use."
+          },
+          "question": {
+            "type": "string"
+          },
+          "answer": {
+            "type": "string"
+          },
+          "preview_image": {
+            "type": "string"
+          },
+          "focus_images": {
+            "type": "array"
+          },
+          "render_warnings": {
+            "type": "array"
+          },
+          "matches": {
+            "type": "array"
+          },
+          "match_count": {
+            "type": "integer"
+          },
+          "fallback": {
+            "type": "object"
+          },
+          "conversion_request": {
+            "type": "string"
+          }
+        }
+      },
+      "timeout_seconds": 900,
+      "media_outputs": [
+        "preview_image",
+        "focus_images[].preview_image"
+      ]
+    },
+    {
+      "name": "cad.inspect",
+      "provider_safe_name": "cad_inspect",
+      "aliases": [
+        "cad_inspect"
+      ],
+      "command": "inspect",
+      "description": "Extract drawing metadata, extents, units, layouts, layers, entity counts, text, dimensions, blocks, and proxy diagnostics.",
+      "argv": [
+        "{python}",
+        "scripts/cad_reader_tool.py",
+        "--work-root",
+        "{skill_dir}",
+        "inspect"
+      ],
+      "parameters_schema": {
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "Host-created absolute DWG/DXF/drawing-PDF path inside the upload allowlist."
+          },
+          "entity_limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200000,
+            "description": "Maximum entities requested from the CAD reader."
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Ignore cache and re-read the drawing."
+          },
+          "preview": {
+            "type": "boolean",
+            "description": "Generate a full preview; keep false for broad first-pass scans unless needed."
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "focus_id": {
+            "type": "string"
+          },
+          "previous_bbox": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "[xmin, ymin, xmax, ymax] in CAD drawing coordinates"
+          },
+          "evidence_id": {
+            "type": "string"
+          },
+          "evidence_strength": {
+            "type": "string",
+            "enum": [
+              "strong",
+              "moderate",
+              "weak"
+            ]
+          },
+          "evidence": {
+            "type": "string",
+            "description": "Backend-local evidence JSON path for adapter/audit use."
+          },
+          "data": {
+            "type": "object"
+          },
+          "summary": {
+            "type": "object"
+          },
+          "preview_image": {
+            "type": "string"
+          },
+          "full_preview": {
+            "type": "string"
+          },
+          "risks": {
+            "type": "array"
+          },
+          "fallback": {
+            "type": "object"
+          }
+        }
+      },
+      "timeout_seconds": 900,
+      "media_outputs": [
+        "data.full_preview"
+      ]
+    },
+    {
+      "name": "cad.render",
+      "provider_safe_name": "cad_render",
+      "aliases": [
+        "cad_render"
+      ],
+      "command": "render",
+      "description": "Render the whole drawing or a CAD coordinate region through remote BricsCAD. Use only with a concrete evidence reason.",
+      "argv": [
+        "{python}",
+        "scripts/cad_reader_tool.py",
+        "--work-root",
+        "{skill_dir}",
+        "render"
+      ],
+      "parameters_schema": {
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "Host-created absolute DWG/DXF/drawing-PDF path inside the upload allowlist."
+          },
+          "entity_limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200000,
+            "description": "Maximum entities requested from the CAD reader."
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Ignore cache and re-read the drawing."
+          },
+          "focus_id": {
+            "type": "string",
+            "description": "Previous focus handle supplied by the host adapter."
+          },
+          "previous_bbox": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "[xmin, ymin, xmax, ymax] in CAD drawing coordinates"
+          },
+          "evidence_id": {
+            "type": "string",
+            "description": "Parent evidence id supplied by the host adapter."
+          },
+          "bbox": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "[xmin, ymin, xmax, ymax] in CAD drawing coordinates"
+          },
+          "output": {
+            "type": "string",
+            "description": "Optional host-approved output path."
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "focus_id": {
+            "type": "string"
+          },
+          "previous_bbox": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "[xmin, ymin, xmax, ymax] in CAD drawing coordinates"
+          },
+          "evidence_id": {
+            "type": "string"
+          },
+          "evidence_strength": {
+            "type": "string",
+            "enum": [
+              "strong",
+              "moderate",
+              "weak"
+            ]
+          },
+          "evidence": {
+            "type": "string",
+            "description": "Backend-local evidence JSON path for adapter/audit use."
+          },
+          "preview_image": {
+            "type": "string"
+          },
+          "bbox": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "[xmin, ymin, xmax, ymax] in CAD drawing coordinates"
+          },
+          "render_mode": {
+            "type": "string"
+          },
+          "render_error": {
+            "type": "object"
+          }
+        }
+      },
+      "timeout_seconds": 900,
+      "media_outputs": [
+        "preview_image"
+      ]
+    },
+    {
+      "name": "cad.query",
+      "provider_safe_name": "cad_query",
+      "aliases": [
+        "cad_query"
+      ],
+      "command": "query",
+      "description": "Search text, dimensions, layers, block names, attributes, object names, and proxy hints.",
+      "argv": [
+        "{python}",
+        "scripts/cad_reader_tool.py",
+        "--work-root",
+        "{skill_dir}",
+        "query"
+      ],
+      "parameters_schema": {
+        "type": "object",
+        "required": [
+          "file",
+          "pattern"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "Host-created absolute DWG/DXF/drawing-PDF path inside the upload allowlist."
+          },
+          "entity_limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200000,
+            "description": "Maximum entities requested from the CAD reader."
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Ignore cache and re-read the drawing."
+          },
+          "focus_id": {
+            "type": "string",
+            "description": "Previous focus handle supplied by the host adapter."
+          },
+          "previous_bbox": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "[xmin, ymin, xmax, ymax] in CAD drawing coordinates"
+          },
+          "evidence_id": {
+            "type": "string",
+            "description": "Parent evidence id supplied by the host adapter."
+          },
+          "pattern": {
+            "type": "string",
+            "minLength": 1
+          },
+          "regex": {
+            "type": "boolean"
+          },
+          "case_sensitive": {
+            "type": "boolean"
+          },
+          "bbox": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "[xmin, ymin, xmax, ymax] in CAD drawing coordinates"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500,
+            "default": 100
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "focus_id": {
+            "type": "string"
+          },
+          "previous_bbox": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "[xmin, ymin, xmax, ymax] in CAD drawing coordinates"
+          },
+          "evidence_id": {
+            "type": "string"
+          },
+          "evidence_strength": {
+            "type": "string",
+            "enum": [
+              "strong",
+              "moderate",
+              "weak"
+            ]
+          },
+          "evidence": {
+            "type": "string",
+            "description": "Backend-local evidence JSON path for adapter/audit use."
+          },
+          "matches": {
+            "type": "array"
+          },
+          "match_count": {
+            "type": "integer"
+          },
+          "focus_bbox": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "[xmin, ymin, xmax, ymax] in CAD drawing coordinates"
+          }
+        }
+      },
+      "timeout_seconds": 900,
+      "media_outputs": []
+    },
+    {
+      "name": "cad.region",
+      "provider_safe_name": "cad_region",
+      "aliases": [
+        "cad_region"
+      ],
+      "command": "region",
+      "description": "Inspect and optionally render a CAD coordinate region. Bbox may come from bbox, previous_bbox, or focus state.",
+      "argv": [
+        "{python}",
+        "scripts/cad_reader_tool.py",
+        "--work-root",
+        "{skill_dir}",
+        "region"
+      ],
+      "parameters_schema": {
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "Host-created absolute DWG/DXF/drawing-PDF path inside the upload allowlist."
+          },
+          "entity_limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200000,
+            "description": "Maximum entities requested from the CAD reader."
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Ignore cache and re-read the drawing."
+          },
+          "focus_id": {
+            "type": "string",
+            "description": "Previous focus handle supplied by the host adapter."
+          },
+          "previous_bbox": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "[xmin, ymin, xmax, ymax] in CAD drawing coordinates"
+          },
+          "evidence_id": {
+            "type": "string",
+            "description": "Parent evidence id supplied by the host adapter."
+          },
+          "bbox": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "[xmin, ymin, xmax, ymax] in CAD drawing coordinates"
+          },
+          "types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "layers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "render": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 200
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "focus_id": {
+            "type": "string"
+          },
+          "previous_bbox": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "[xmin, ymin, xmax, ymax] in CAD drawing coordinates"
+          },
+          "evidence_id": {
+            "type": "string"
+          },
+          "evidence_strength": {
+            "type": "string",
+            "enum": [
+              "strong",
+              "moderate",
+              "weak"
+            ]
+          },
+          "evidence": {
+            "type": "string",
+            "description": "Backend-local evidence JSON path for adapter/audit use."
+          },
+          "items": {
+            "type": "array"
+          },
+          "item_count": {
+            "type": "integer"
+          },
+          "preview_image": {
+            "type": "string"
+          },
+          "render_mode": {
+            "type": "string"
+          },
+          "render_error": {
+            "type": "object"
+          },
+          "bbox": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "[xmin, ymin, xmax, ymax] in CAD drawing coordinates"
+          }
+        }
+      },
+      "timeout_seconds": 900,
+      "media_outputs": [
+        "preview_image"
+      ]
+    },
+    {
+      "name": "cad.measure",
+      "provider_safe_name": "cad_measure",
+      "aliases": [
+        "cad_measure"
+      ],
+      "command": "measure",
+      "description": "Count objects and compute basic CAD length, area, or point-distance evidence in an explicit scope.",
+      "argv": [
+        "{python}",
+        "scripts/cad_reader_tool.py",
+        "--work-root",
+        "{skill_dir}",
+        "measure"
+      ],
+      "parameters_schema": {
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "Host-created absolute DWG/DXF/drawing-PDF path inside the upload allowlist."
+          },
+          "entity_limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200000,
+            "description": "Maximum entities requested from the CAD reader."
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Ignore cache and re-read the drawing."
+          },
+          "focus_id": {
+            "type": "string",
+            "description": "Previous focus handle supplied by the host adapter."
+          },
+          "previous_bbox": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "[xmin, ymin, xmax, ymax] in CAD drawing coordinates"
+          },
+          "evidence_id": {
+            "type": "string",
+            "description": "Parent evidence id supplied by the host adapter."
+          },
+          "bbox": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "[xmin, ymin, xmax, ymax] in CAD drawing coordinates"
+          },
+          "points": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "[x1, y1, x2, y2]"
+          },
+          "types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "layers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 200
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "focus_id": {
+            "type": "string"
+          },
+          "previous_bbox": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "[xmin, ymin, xmax, ymax] in CAD drawing coordinates"
+          },
+          "evidence_id": {
+            "type": "string"
+          },
+          "evidence_strength": {
+            "type": "string",
+            "enum": [
+              "strong",
+              "moderate",
+              "weak"
+            ]
+          },
+          "evidence": {
+            "type": "string",
+            "description": "Backend-local evidence JSON path for adapter/audit use."
+          },
+          "data": {
+            "type": "object"
+          },
+          "sample_items": {
+            "type": "array"
+          }
+        }
+      },
+      "timeout_seconds": 900,
+      "media_outputs": []
+    },
+    {
+      "name": "cad.diagnose",
+      "provider_safe_name": "cad_diagnose",
+      "aliases": [
+        "cad_diagnose"
+      ],
+      "command": "diagnose",
+      "description": "Return drawing-reading risks, proxy/Tianzheng/T20 fallback status, weak-evidence reasons, and provider conversion request guidance. Keep first pass non-rendering for broad scans.",
+      "argv": [
+        "{python}",
+        "scripts/cad_reader_tool.py",
+        "--work-root",
+        "{skill_dir}",
+        "diagnose"
+      ],
+      "parameters_schema": {
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "Host-created absolute DWG/DXF/drawing-PDF path inside the upload allowlist."
+          },
+          "entity_limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200000,
+            "description": "Maximum entities requested from the CAD reader."
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Ignore cache and re-read the drawing."
+          },
+          "focus_id": {
+            "type": "string",
+            "description": "Previous focus handle supplied by the host adapter."
+          },
+          "previous_bbox": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "[xmin, ymin, xmax, ymax] in CAD drawing coordinates"
+          },
+          "evidence_id": {
+            "type": "string",
+            "description": "Parent evidence id supplied by the host adapter."
+          },
+          "render_focus": {
+            "type": "boolean",
+            "description": "Only true when a concrete focus/bbox/evidence exists and the host will caption the image."
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "focus_id": {
+            "type": "string"
+          },
+          "previous_bbox": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "[xmin, ymin, xmax, ymax] in CAD drawing coordinates"
+          },
+          "evidence_id": {
+            "type": "string"
+          },
+          "evidence_strength": {
+            "type": "string",
+            "enum": [
+              "strong",
+              "moderate",
+              "weak"
+            ]
+          },
+          "evidence": {
+            "type": "string",
+            "description": "Backend-local evidence JSON path for adapter/audit use."
+          },
+          "answer": {
+            "type": "string"
+          },
+          "risks": {
+            "type": "array"
+          },
+          "fallback": {
+            "type": "object"
+          },
+          "conversion_request": {
+            "type": "string"
+          },
+          "focus_bbox": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "[xmin, ymin, xmax, ymax] in CAD drawing coordinates"
+          },
+          "preview_image": {
+            "type": "string"
+          },
+          "render_mode": {
+            "type": "string"
+          },
+          "render_error": {
+            "type": "object"
+          }
+        }
+      },
+      "timeout_seconds": 900,
+      "media_outputs": [
+        "preview_image"
+      ]
+    }
+  ]
+}

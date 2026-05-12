@@ -1,0 +1,2 @@
+# cad-reader uses only the Python standard library.
+# Keep this file as an extension point for future optional extractors.

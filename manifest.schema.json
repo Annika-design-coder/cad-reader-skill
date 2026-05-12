@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/cad-reader/agent-tools.schema.json",
+  "title": "cad-reader agent tool manifest",
+  "type": "object",
+  "required": ["schema_version", "package_version", "name", "runtime", "environment", "inputs", "triggers", "tools"],
+  "properties": {
+    "schema_version": {"type": "string"},
+    "package_version": {"type": "string"},
+    "name": {"const": "cad-reader"},
+    "description": {"type": "string"},
+    "license": {"type": "string"},
+    "entrypoint": {"type": "string"},
+    "runtime": {"type": "object"},
+    "install": {"type": "object"},
+    "environment": {"type": "object"},
+    "inputs": {"type": "object"},
+    "triggers": {"type": "object"},
+    "adapter_display_policy": {"type": "object"},
+    "artifact_contract": {"type": "object"},
+    "execution_policy": {"type": "object"},
+    "tools": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "provider_safe_name", "command", "argv", "parameters_schema", "output_schema", "timeout_seconds"],
+        "properties": {
+          "name": {"type": "string"},
+          "provider_safe_name": {"type": "string", "pattern": "^[A-Za-z0-9_]+$"},
+          "aliases": {"type": "array", "items": {"type": "string"}},
+          "command": {"type": "string"},
+          "description": {"type": "string"},
+          "argv": {"type": "array", "items": {"type": "string"}},
+          "parameters_schema": {"type": "object"},
+          "output_schema": {"type": "object"},
+          "timeout_seconds": {"type": "integer", "minimum": 1},
+          "media_outputs": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    }
+  }
+}
